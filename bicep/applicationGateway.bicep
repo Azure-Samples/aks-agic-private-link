@@ -104,7 +104,7 @@ var publicFrontendIPConfiguration = {
     publicIPAddress: {
       id: applicationGatewayPublicIpAddress.id
     }
-    privateLinkConfiguration: privateLinkEnabled ? {
+    privateLinkConfiguration: privateLinkEnabled && frontendIpConfigurationType == 'Public' ? {
       id: '${applicationGatewayResourceId}/privateLinkConfigurations/${privateLinkName}'
     } : null
   }
@@ -118,6 +118,9 @@ var privateFrontendIPConfiguration = {
     subnet: {
       id: subnetId
     }
+    privateLinkConfiguration: privateLinkEnabled && frontendIpConfigurationType != 'Public'? {
+      id: '${applicationGatewayResourceId}/privateLinkConfigurations/${privateLinkName}'
+    } : null
   }
 }
 

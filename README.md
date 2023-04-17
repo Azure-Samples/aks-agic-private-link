@@ -125,10 +125,9 @@ The Bicep modules deploy the following Azure resources for the service provider:
   - Azure Container Registry
   - Azure Storage Account
   - Azure jump-box virtual machine
-- [Microsoft.Resources/deploymentScripts](https://learn.microsoft.com/en-us/azure/templates/microsoft.resources/deploymentscripts?pivots=deployment-language-bicep): a deployment script is used to run the `install-helm-charts-and-app.sh` Bash script which installs the [httpbin](https://httpbin.org/) web application via YAML templates and the following packages to the AKS cluster via [Helm](https://helm.sh/). For more information on deployment scripts, see [Use deployment scripts in Bicep](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-script-bicep)
+- [Microsoft.Resources/deploymentScripts](https://learn.microsoft.com/en-us/azure/templates/microsoft.resources/deploymentscripts?pivots=deployment-language-bicep): a deployment script is used to run the `install-helm-charts-and-app.sh` Bash script which installs the [httpbin](https://httpbin.org/) web application via YAML templates and [cert-Manager](https://cert-manager.io/docs/) via [Helm](https://helm.sh/) to the AKS cluster. For more information on deployment scripts, see [Use deployment scripts in Bicep](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-script-bicep)
   - [NGINX Ingress Controller](https://docs.nginx.com/nginx-ingress-controller/)
-  - [Cert-Manager](https://cert-manager.io/docs/)
-  - [Prometheus](https://prometheus.io/)
+- [Microsoft.Network/privateDnsZones](https://docs.microsoft.com/en-us/azure/templates/microsoft.network/privatednszones): an [Azure Private DNS Zone](https://docs.microsoft.com/en-us/azure/dns/private-dns-overview) is used by the client virtual machine to solve the URL of the server application to the private IP address of the private endpoint. If the Kubernetes ingress object has a hostname equal to `httpbin.contoso.internal`, the name of the Private DNS Zone needs to be `contoso.internal`, while the name of the A record that maps the service FQDN to the private IP address of the private endpoint needs to be `httpbin`.
 
 The Bicep modules deploy the following Azure resources for the service consumer:
 
@@ -160,459 +159,396 @@ You can deploy the Bicep modules in the `bicep` folder using the `deploy.sh` Bas
 
 We suggest reading sensitive configuration data such as passwords or SSH keys from a pre-existing Azure Key Vault resource. For more information, see [Use Azure Key Vault to pass secure parameter value during Bicep deployment](https://docs.microsoft.com/en-us/azure/azure-resource-manager/bicep/key-vault-parameter?tabs=azure-cli).
 
-```bash
-#!/bin/bash
+## Application Gateway Bicep module
 
-# Template
-template="main.bicep"
-parameters="main.parameters.json"
+The following table contains the Bicep code used to deploy the [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) and its [WAF Policy](https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/afds-overview). Please note that the module configures the [Application Gateway Private Link](https://learn.microsoft.com/en-us/azure/application-gateway/private-link) only if the value of the `privateLinkEnabled` parameter is `true`. If the Application Gateway is configured only with a public frontend IP configuration, the private link will use this configuration, otherwise it will use the private frontend IP configuration.
 
-# AKS cluster name
-prefix="Yellow"
-aksName="${prefix}Aks"
-validateTemplate=1
-useWhatIf=1
-update=1
-installExtensions=0
+```bicep
+// Parameters
+@description('Specifies the name of the Application Gateway.')
+param name string
 
-# Name and location of the resource group for the Azure Kubernetes Service (AKS) cluster
-aksResourceGroupName="${prefix}RG"
-location="northeurope"
+@description('Specifies the sku of the Application Gateway.')
+param skuName string = 'WAF_v2'
 
-# Name and resource group name of the Azure Container Registry used by the AKS cluster.
-# The name of the cluster is also used to create or select an existing admin group in the Azure AD tenant.
-acrName="${prefix}Acr"
-acrResourceGroupName="$aksResourceGroupName"
-acrSku="Premium"
+@description('Specifies the frontend IP configuration type.')
+@allowed([
+  'Public'
+  'Private'
+  'Both'
+])
+param frontendIpConfigurationType string
 
-# Name of Key Vault
-keyVaultName="${prefix}KeyVault"
+@description('Specifies the name of the public IP adddress used by the Application Gateway.')
+param publicIpAddressName string = '${name}PublicIp'
 
-# Name of the Log Analytics
-logAnalyticsWorkspaceName="${prefix}LogAnalytics"
+@description('Specifies the location of the Application Gateway.')
+param location string
 
-# Name of the virtual machine
-vmName="${prefix}Vm"
+@description('Specifies the resource tags.')
+param tags object
 
-# Subscription id, subscription name, and tenant id of the current subscription
-subscriptionId=$(az account show --query id --output tsv)
-subscriptionName=$(az account show --query name --output tsv)
-tenantId=$(az account show --query tenantId --output tsv)
+@description('Specifies the resource id of the subnet used by the Application Gateway.')
+param subnetId string
 
-# Install aks-preview Azure extension
-if [[ $installExtensions == 1 ]]; then
-  echo "Checking if [aks-preview] extension is already installed..."
-  az extension show --name aks-preview &>/dev/null
+@description('Specifies the resource id of the subnet used by the Application Gateway Private Link.')
+param privateLinkSubnetId string
 
-  if [[ $? == 0 ]]; then
-    echo "[aks-preview] extension is already installed"
+@description('Specifies the private IP address of the Application Gateway.')
+param privateIpAddress string
 
-    # Update the extension to make sure you have the latest version installed
-    echo "Updating [aks-preview] extension..."
-    az extension update --name aks-preview &>/dev/null
-  else
-    echo "[aks-preview] extension is not installed. Installing..."
+@description('Specifies the availability zones of the Application Gateway.')
+param availabilityZones array
 
-    # Install aks-preview extension
-    az extension add --name aks-preview 1>/dev/null
+@description('Specifies the workspace id of the Log Analytics used to monitor the Application Gateway.')
+param workspaceId string
 
-    if [[ $? == 0 ]]; then
-      echo "[aks-preview] extension successfully installed"
-    else
-      echo "Failed to install [aks-preview] extension"
-      exit
-    fi
-  fi
+@description('Specifies the lower bound on number of Application Gateway capacity.')
+param minCapacity int = 1
 
-  # Registering AKS features
-  aksExtensions=(
-    "AKS-KedaPreview"
-    "RunCommandPreview"
-    "EnableOIDCIssuerPreview"
-    "EnableWorkloadIdentityPreview"
-    "EnableImageCleanerPreview"
-    "AKS-VPAPreview")
-  ok=0
-  registeringExtensions=()
-  for aksExtension in ${aksExtensions[@]}; do
-    echo "Checking if [$aksExtension] extension is already registered..."
-    extension=$(az feature list -o table --query "[?contains(name, 'Microsoft.ContainerService/$aksExtension') && @.properties.state == 'Registered'].{Name:name}" --output tsv)
-    if [[ -z $extension ]]; then
-      echo "[$aksExtension] extension is not registered."
-      echo "Registering [$aksExtension] extension..."
-      az feature register --name $aksExtension --namespace Microsoft.ContainerService
-      registeringExtensions+=("$aksExtension")
-      ok=1
-    else
-      echo "[$aksExtension] extension is already registered."
-    fi
-  done
-  echo $registeringExtensions
-  delay=1
-  for aksExtension in ${registeringExtensions[@]}; do
-    echo -n "Checking if [$aksExtension] extension is already registered..."
-    while true; do
-      extension=$(az feature list -o table --query "[?contains(name, 'Microsoft.ContainerService/$aksExtension') && @.properties.state == 'Registered'].{Name:name}" --output tsv)
-      if [[ -z $extension ]]; then
-        echo -n "."
-        sleep $delay
-      else
-        echo "."
-        break
-      fi
-    done
-  done
+@description('Specifies the upper bound on number of Application Gateway capacity.')
+param maxCapacity int = 10
 
-  if [[ $ok == 1 ]]; then
-    echo "Refreshing the registration of the Microsoft.ContainerService resource provider..."
-    az provider register --namespace Microsoft.ContainerService
-    echo "Microsoft.ContainerService resource provider registration successfully refreshed"
-  fi
+@description('Specifies whether create or not a Private Link for the Application Gateway.')
+param privateLinkEnabled bool = false
 
-  # Registering Network features
-  networkExtensions=("EnableApplicationGatewayNetworkIsolation")
-  ok=0
-  registeringExtensions=()
-  for networkExtension in ${networkExtensions[@]}; do
-    echo "Checking if [$networkExtension] extension is already registered..."
-    extension=$(az feature list -o table --query "[?contains(name, 'Microsoft.Network/$networkExtension') && @.properties.state == 'Registered'].{Name:name}" --output tsv)
-    if [[ -z $extension ]]; then
-      echo "[$networkExtension] extension is not registered."
-      echo "Registering [$networkExtension] extension..."
-      az feature register --name $networkExtension --namespace Microsoft.ContainerService
-      registeringExtensions+=("$networkExtension")
-      ok=1
-    else
-      echo "[$networkExtension] extension is already registered."
-    fi
-  done
-  echo $registeringExtensions
-  delay=1
-  for networkExtension in ${registeringExtensions[@]}; do
-    echo -n "Checking if [$networkExtension] extension is already registered..."
-    while true; do
-      extension=$(az feature list -o table --query "[?contains(name, 'Microsoft.Network/$networkExtension') && @.properties.state == 'Registered'].{Name:name}" --output tsv)
-      if [[ -z $extension ]]; then
-        echo -n "."
-        sleep $delay
-      else
-        echo "."
-        break
-      fi
-    done
-  done
+@description('Specifies the name of the WAF policy')
+param wafPolicyName string = '${name}WafPolicy'
 
-  if [[ $ok == 1 ]]; then
-    echo "Refreshing the registration of the Microsoft.ContainerService resource provider..."
-    az provider register --namespace Microsoft.Network
-    echo "Microsoft.ContainerService resource provider registration successfully refreshed"
-  fi
-fi
+@description('Specifies the mode of the WAF policy.')
+@allowed([
+  'Detection'
+  'Prevention'
+])
+param wafPolicyMode string = 'Prevention'
 
-# Get the last Kubernetes version available in the region
-kubernetesVersion=$(az aks get-versions --location $location --query "orchestrators[?isPreview==false].orchestratorVersion | sort(@) | [-1]" --output tsv)
+@description('Specifies the state of the WAF policy.')
+@allowed([
+  'Enabled'
+  'Disabled '
+])
+param wafPolicyState string = 'Enabled'
 
-if [[ -n $kubernetesVersion ]]; then
-  echo "Successfully retrieved the last Kubernetes version [$kubernetesVersion] supported by AKS in [$location] Azure region"
-else
-  echo "Failed to retrieve the last Kubernetes version supported by AKS in [$location] Azure region"
-  exit
-fi
+@description('Specifies the maximum file upload size in Mb for the WAF policy.')
+param wafPolicyFileUploadLimitInMb int = 100
 
-# Check if the resource group already exists
-echo "Checking if [$aksResourceGroupName] resource group actually exists in the [$subscriptionName] subscription..."
+@description('Specifies the maximum request body size in Kb for the WAF policy.')
+param wafPolicyMaxRequestBodySizeInKb int = 128
 
-az group show --name $aksResourceGroupName &>/dev/null
+@description('Specifies the whether to allow WAF to check request Body.')
+param wafPolicyRequestBodyCheck bool = true
 
-if [[ $? != 0 ]]; then
-  echo "No [$aksResourceGroupName] resource group actually exists in the [$subscriptionName] subscription"
-  echo "Creating [$aksResourceGroupName] resource group in the [$subscriptionName] subscription..."
+@description('Specifies the rule set type.')
+param wafPolicyRuleSetType string = 'OWASP'
 
-  # Create the resource group
-  az group create --name $aksResourceGroupName --location $location 1>/dev/null
+@description('Specifies the rule set version.')
+param wafPolicyRuleSetVersion string = '3.2'
 
-  if [[ $? == 0 ]]; then
-    echo "[$aksResourceGroupName] resource group successfully created in the [$subscriptionName] subscription"
-  else
-    echo "Failed to create [$aksResourceGroupName] resource group in the [$subscriptionName] subscription"
-    exit
-  fi
-else
-  echo "[$aksResourceGroupName] resource group already exists in the [$subscriptionName] subscription"
-fi
+@description('Specifies the name of the Key Vault resource.')
+param keyVaultName string
 
-# Create AKS cluster if does not exist
-echo "Checking if [$aksName] aks cluster actually exists in the [$aksResourceGroupName] resource group..."
+// Variables
+var diagnosticSettingsName = 'diagnosticSettings'
+var applicationGatewayResourceId = resourceId('Microsoft.Network/applicationGateways', name)
+var keyVaultSecretsUserRoleDefinitionId = resourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
+var gatewayIPConfigurationName = 'DefaultGatewayIpConfiguration'
+var frontendPortName = 'DefaultFrontendPort'
+var backendAddressPoolName = 'DefaultBackendPool'
+var backendHttpSettingsName = 'DefaultBackendHttpSettings'
+var httpListenerName = 'DefaultHttpListener'
+var routingRuleName = 'DefaultRequestRoutingRule'
+var privateLinkName = 'DefaultPrivateLink'
+var publicFrontendIPConfigurationName = 'PublicFrontendIPConfiguration'
+var privateFrontendIPConfigurationName = 'PrivateFrontendIPConfiguration'
+var frontendIPConfigurationName = frontendIpConfigurationType == 'Public' ? publicFrontendIPConfigurationName : privateFrontendIPConfigurationName
+var applicationGatewayZones = !empty(availabilityZones) ? availabilityZones : []
 
-az aks show --name $aksName --resource-group $aksResourceGroupName &>/dev/null
-notExists=$?
+var publicFrontendIPConfiguration = {
+  name: publicFrontendIPConfigurationName
+  properties: {
+    privateIPAllocationMethod: 'Dynamic'
+    publicIPAddress: {
+      id: applicationGatewayPublicIpAddress.id
+    }
+    privateLinkConfiguration: privateLinkEnabled && frontendIpConfigurationType == 'Public' ? {
+      id: '${applicationGatewayResourceId}/privateLinkConfigurations/${privateLinkName}'
+    } : null
+  }
+}
 
-if [[ $notExists != 0 || $update == 1 ]]; then
+var privateFrontendIPConfiguration = {
+  name: privateFrontendIPConfigurationName
+  properties: {
+    privateIPAllocationMethod: 'Static'
+    privateIPAddress: privateIpAddress
+    subnet: {
+      id: subnetId
+    }
+    privateLinkConfiguration: privateLinkEnabled && frontendIpConfigurationType != 'Public'? {
+      id: '${applicationGatewayResourceId}/privateLinkConfigurations/${privateLinkName}'
+    } : null
+  }
+}
 
-  if [[ $notExists != 0 ]]; then
-    echo "No [$aksName] aks cluster actually exists in the [$aksResourceGroupName] resource group"
-  else
-    echo "[$aksName] aks cluster already exists in the [$aksResourceGroupName] resource group. Updating the cluster..."
-  fi
+var frontendIPConfigurations = union(
+  frontendIpConfigurationType == 'Public' ? array(publicFrontendIPConfiguration) : [],
+  frontendIpConfigurationType == 'Private' ? array(privateFrontendIPConfiguration) : [],
+  frontendIpConfigurationType == 'Both' ? concat(array(publicFrontendIPConfiguration), array(privateFrontendIPConfiguration)) : []
+)
 
-  # Delete any existing role assignments for the user-defined managed identity of the AKS cluster
-  # in case you are re-deploying the solution in an existing resource group
-  echo "Retrieving the list of role assignments on [$aksResourceGroupName] resource group..."
-  assignmentIds=$(az role assignment list \
-    --scope "/subscriptions/${subscriptionId}/resourceGroups/${aksResourceGroupName}" \
-    --query [].id \
-    --output tsv \
-    --only-show-errors)
+var sku = union({
+    name: skuName
+    tier: skuName
+  }, maxCapacity == 0 ? {
+    capacity: minCapacity
+  } : {})
 
-  if [[ -n $assignmentIds ]]; then
-    echo "[${#assignmentIds[@]}] role assignments have been found on [$aksResourceGroupName] resource group"
-    for assignmentId in ${assignmentIds[@]}; do
-      if [[ -n $assignmentId ]]; then
-        az role assignment delete --ids $assignmentId
+var applicationGatewayProperties = union({
+    sku: sku
+    gatewayIPConfigurations: [
+      {
+        name: gatewayIPConfigurationName
+        properties: {
+          subnet: {
+            id: subnetId
+          }
+        }
+      }
+    ]
+    frontendIPConfigurations: frontendIPConfigurations
+    frontendPorts: [
+      {
+        name: frontendPortName
+        properties: {
+          port: 80
+        }
+      }
+    ]
+    backendAddressPools: [
+      {
+        name: backendAddressPoolName
+      }
+    ]
+    backendHttpSettingsCollection: [
+      {
+        name: backendHttpSettingsName
+        properties: {
+          port: 80
+          protocol: 'Http'
+          cookieBasedAffinity: 'Disabled'
+          requestTimeout: 30
+          pickHostNameFromBackendAddress: true
+        }
+      }
+    ]
+    httpListeners: [
+      {
+        name: httpListenerName
+        properties: {
+          frontendIPConfiguration: {
+            id: '${applicationGatewayResourceId}/frontendIPConfigurations/${frontendIPConfigurationName}'
+          }
+          frontendPort: {
+            id: '${applicationGatewayResourceId}/frontendPorts/${frontendPortName}'
+          }
+          protocol: 'Http'
+        }
+      }
+    ]
+    requestRoutingRules: [
+      {
+        name: routingRuleName
+        properties: {
+          ruleType: 'Basic'
+          priority: 1000
+          httpListener: {
+            id: '${applicationGatewayResourceId}/httpListeners/${httpListenerName}'
+          }
+          backendAddressPool: {
+            id: '${applicationGatewayResourceId}/backendAddressPools/${backendAddressPoolName}'
+          }
+          backendHttpSettings: {
+            id: '${applicationGatewayResourceId}/backendHttpSettingsCollection/${backendHttpSettingsName}'
+          }
+        }
+      }
+    ]
+    privateLinkConfigurations: privateLinkEnabled ? [
+      {
+        name: privateLinkName
+        properties: {
+          ipConfigurations: [
+            {
+              name: 'PrivateLinkDefaultIPConfiguration'
+              properties: {
+                privateIPAllocationMethod: 'Dynamic'
+                subnet: {
+                  id: privateLinkSubnetId
+                }
+              }
+            }
+          ]
+        }
+      }
+    ] : []
+    firewallPolicy: {
+      id: wafPolicy.id
+    }
+  }, maxCapacity > 0 ? {
+    autoscaleConfiguration: {
+      minCapacity: minCapacity
+      maxCapacity: maxCapacity
+    }
+  } : {})
 
-        if [[ $? == 0 ]]; then
-          assignmentName=$(echo $assignmentId | awk -F '/' '{print $NF}')
-          echo "[$assignmentName] role assignment on [$aksResourceGroupName] resource group successfully deleted"
-        fi
-      fi
-    done
-  else
-    echo "No role assignment actually exists on [$aksResourceGroupName] resource group"
-  fi
+var applicationGatewayLogCategories = [
+  'ApplicationGatewayAccessLog'
+  'ApplicationGatewayFirewallLog'
+  'ApplicationGatewayPerformanceLog'
+]
+var applicationGatewayMetricCategories = [
+  'AllMetrics'
+]
+var applicationGatewayLogs = [for category in applicationGatewayLogCategories: {
+  category: category
+  enabled: true
+}]
+var applicationGatewayMetrics = [for category in applicationGatewayMetricCategories: {
+  category: category
+  enabled: true
+}]
 
-  # Get the kubelet managed identity used by the AKS cluster
-  echo "Retrieving the kubelet identity from the [$aksName] AKS cluster..."
-  clientId=$(az aks show \
-    --name $aksName \
-    --resource-group $aksResourceGroupName \
-    --query identityProfile.kubeletidentity.clientId \
-    --output tsv 2>/dev/null)
+// Resources
+resource applicationGatewayIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2018-11-30' = {
+  name: '${name}Identity'
+  location: location
+}
 
-  if [[ -n $clientId ]]; then
-    # Delete any role assignment to kubelet managed identity on any ACR in the resource group
-    echo "kubelet identity of the [$aksName] AKS cluster successfully retrieved"
-    echo "Retrieving the list of ACR resources in the [$aksResourceGroupName] resource group..."
-    acrIds=$(az acr list \
-      --resource-group $aksResourceGroupName \
-      --query [].id \
-      --output tsv)
+resource applicationGatewayPublicIpAddress 'Microsoft.Network/publicIPAddresses@2022-07-01' = if (frontendIpConfigurationType != 'Private') {
+  name: publicIpAddressName
+  location: location
+  zones: applicationGatewayZones
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
 
-    if [[ -n $acrIds ]]; then
-      echo "[${#acrIds[@]}] ACR resources have been found in [$aksResourceGroupName] resource group"
-      for acrId in ${acrIds[@]}; do
-        if [[ -n $acrId ]]; then
-          acrName=$(echo $acrId | awk -F '/' '{print $NF}')
-          echo "Retrieving the list of role assignments on [$acrName] ACR..."
-          assignmentIds=$(az role assignment list \
-            --scope "$acrId" \
-            --query [].id \
-            --output tsv \
-            --only-show-errors)
+resource applicationGateway 'Microsoft.Network/applicationGateways@2022-07-01' = {
+  name: name
+  location: location
+  tags: tags
+  zones: applicationGatewayZones
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${applicationGatewayIdentity.id}': {}
+    }
+  }
+  properties: applicationGatewayProperties
+}
 
-          if [[ -n $assignmentIds ]]; then
-            echo "[${#assignmentIds[@]}] role assignments have been found on [$acrName] ACR"
-            for assignmentId in ${assignmentIds[@]}; do
-              if [[ -n $assignmentId ]]; then
-                az role assignment delete --ids $assignmentId
+resource wafPolicy 'Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies@2022-07-01' = {
+  name: wafPolicyName
+  location: location
+  tags: tags
+  properties: {
+    customRules: [
+      {
+        name: 'BlockMe'
+        priority: 1
+        ruleType: 'MatchRule'
+        action: 'Block'
+        matchConditions: [
+          {
+            matchVariables: [
+              {
+                variableName: 'QueryString'
+              }
+            ]
+            operator: 'Contains'
+            negationConditon: false
+            matchValues: [
+              'blockme'
+            ]
+          }
+        ]
+      }
+      {
+        name: 'BlockEvilBot'
+        priority: 2
+        ruleType: 'MatchRule'
+        action: 'Block'
+        matchConditions: [
+          {
+            matchVariables: [
+              {
+                variableName: 'RequestHeaders'
+                selector: 'User-Agent'
+              }
+            ]
+            operator: 'Contains'
+            negationConditon: false
+            matchValues: [
+              'evilbot'
+            ]
+            transforms: [
+              'Lowercase'
+            ]
+          }
+        ]
+      }
+    ]
+    policySettings: {
+      requestBodyCheck: wafPolicyRequestBodyCheck
+      maxRequestBodySizeInKb: wafPolicyMaxRequestBodySizeInKb
+      fileUploadLimitInMb: wafPolicyFileUploadLimitInMb
+      mode: wafPolicyMode
+      state: wafPolicyState
+    }
+    managedRules: {
+      managedRuleSets: [
+        {
+          ruleSetType: wafPolicyRuleSetType
+          ruleSetVersion: wafPolicyRuleSetVersion
+        }
+      ]
+    }
+  }
+}
 
-                if [[ $? == 0 ]]; then
-                  assignmentName=$(echo $assignmentId | awk -F '/' '{print $NF}')
-                  echo "[$assignmentName] role assignment on [$acrName] ACR successfully deleted"
-                fi
-              fi
-            done
-          else
-            echo "No role assignment actually exists on [$acrName] ACR"
-          fi
-        fi
-      done
-    else
-      echo "No ACR actually exists in [$aksResourceGroupName] resource group"
-    fi
-  else
-    echo "No kubelet identity exists for the [$aksName] AKS cluster"
-  fi
+resource keyVault 'Microsoft.KeyVault/vaults@2021-10-01' existing = {
+  name: keyVaultName
+}
 
-  # Validate the Bicep template
-  if [[ $validateTemplate == 1 ]]; then
-    if [[ $useWhatIf == 1 ]]; then
-      # Execute a deployment What-If operation at resource group scope.
-      echo "Previewing changes deployed by [$template] Bicep template..."
-      az deployment group what-if \
-        --resource-group $aksResourceGroupName \
-        --template-file $template \
-        --parameters $parameters \
-        --parameters \
-        prefix=$prefix \
-        aksClusterName=$aksName \
-        aksClusterKubernetesVersion=$kubernetesVersion \
-        acrName=$acrName \
-        keyVaultName=$keyVaultName \
-        logAnalyticsWorkspaceName=$logAnalyticsWorkspaceName \
-        vmName=$vmName
+resource keyVaultSecretsUserApplicationGatewayIdentityRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: keyVault
+  name: guid(keyVault.id, applicationGatewayIdentity.name, 'keyVaultSecretsUser')
+  properties: {
+    roleDefinitionId: keyVaultSecretsUserRoleDefinitionId
+    principalType: 'ServicePrincipal'
+    principalId: applicationGatewayIdentity.properties.principalId
+  }
+}
 
-      if [[ $? == 0 ]]; then
-        echo "[$template] Bicep template validation succeeded"
-      else
-        echo "Failed to validate [$template] Bicep template"
-        exit
-      fi
-    else
-      # Validate the Bicep template
-      echo "Validating [$template] Bicep template..."
-      output=$(az deployment group validate \
-        --resource-group $aksResourceGroupName \
-        --template-file $template \
-        --parameters $parameters \
-        --parameters \
-        prefix=$prefix \
-        aksClusterName=$aksName \
-        aksClusterKubernetesVersion=$kubernetesVersion \
-        acrName=$acrName \
-        keyVaultName=$keyVaultName \
-        logAnalyticsWorkspaceName=$logAnalyticsWorkspaceName \
-        vmName=$vmName)
+resource applicationGatewayDiagnosticSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: diagnosticSettingsName
+  scope: applicationGateway
+  properties: {
+    workspaceId: workspaceId
+    logs: applicationGatewayLogs
+    metrics: applicationGatewayMetrics
+  }
+}
 
-      if [[ $? == 0 ]]; then
-        echo "[$template] Bicep template validation succeeded"
-      else
-        echo "Failed to validate [$template] Bicep template"
-        echo $output
-        exit
-      fi
-    fi
-  fi
-
-  # Deploy the Bicep template
-  echo "Deploying [$template] Bicep template..."
-  az deployment group create \
-    --resource-group $aksResourceGroupName \
-    --only-show-errors \
-    --template-file $template \
-    --parameters $parameters \
-    --parameters \
-    prefix=$prefix \
-    aksClusterName=$aksName \
-    aksClusterKubernetesVersion=$kubernetesVersion \
-    acrName=$acrName \
-    keyVaultName=$keyVaultName \
-    logAnalyticsWorkspaceName=$logAnalyticsWorkspaceName \
-    vmName=$vmName 1>/dev/null
-
-  if [[ $? == 0 ]]; then
-    echo "[$template] Bicep template successfully provisioned"
-  else
-    echo "Failed to provision the [$template] Bicep template"
-    exit
-  fi
-else
-  echo "[$aksName] aks cluster already exists in the [$aksResourceGroupName] resource group"
-fi
-
-# Create AKS cluster if does not exist
-echo "Checking if [$aksName] aks cluster actually exists in the [$aksResourceGroupName] resource group..."
-
-az aks show --name $aksName --resource-group $aksResourceGroupName &>/dev/null
-
-if [[ $? != 0 ]]; then
-  echo "No [$aksName] aks cluster actually exists in the [$aksResourceGroupName] resource group"
-  exit
-fi
-
-# Get the user principal name of the current user
-echo "Retrieving the user principal name of the current user from the [$tenantId] Azure AD tenant..."
-userPrincipalName=$(az account show --query user.name --output tsv)
-if [[ -n $userPrincipalName ]]; then
-  echo "[$userPrincipalName] user principal name successfully retrieved from the [$tenantId] Azure AD tenant"
-else
-  echo "Failed to retrieve the user principal name of the current user from the [$tenantId] Azure AD tenant"
-  exit
-fi
-
-# Retrieve the objectId of the user in the Azure AD tenant used by AKS for user authentication
-echo "Retrieving the objectId of the [$userPrincipalName] user principal name from the [$tenantId] Azure AD tenant..."
-userObjectId=$(az ad user show --id $userPrincipalName --query id --output tsv 2>/dev/null)
-
-if [[ -n $userObjectId ]]; then
-  echo "[$userObjectId] objectId successfully retrieved for the [$userPrincipalName] user principal name"
-else
-  echo "Failed to retrieve the objectId of the [$userPrincipalName] user principal name"
-  exit
-fi
-
-# Retrieve the resource id of the AKS cluster
-echo "Retrieving the resource id of the [$aksName] AKS cluster..."
-aksClusterId=$(az aks show \
-  --name "$aksName" \
-  --resource-group "$aksResourceGroupName" \
-  --query id \
-  --output tsv 2>/dev/null)
-
-if [[ -n $aksClusterId ]]; then
-  echo "Resource id of the [$aksName] AKS cluster successfully retrieved"
-else
-  echo "Failed to retrieve the resource id of the [$aksName] AKS cluster"
-  exit
-fi
-
-# Assign Azure Kubernetes Service RBAC Cluster Admin role to the current user
-role="Azure Kubernetes Service RBAC Cluster Admin"
-echo "Checking if [$userPrincipalName] user has been assigned to [$role] role on the [$aksName] AKS cluster..."
-current=$(az role assignment list \
-  --assignee $userObjectId \
-  --scope $aksClusterId \
-  --query "[?roleDefinitionName=='$role'].roleDefinitionName" \
-  --output tsv 2>/dev/null)
-
-if [[ $current == "Owner" ]] || [[ $current == "Contributor" ]] || [[ $current == "$role" ]]; then
-  echo "[$userPrincipalName] user is already assigned to the [$current] role on the [$aksName] AKS cluster"
-else
-  echo "[$userPrincipalName] user is not assigned to the [$role] role on the [$aksName] AKS cluster"
-  echo "Assigning the [$userPrincipalName] user to the [$role] role on the [$aksName] AKS cluster..."
-
-  az role assignment create \
-    --role "$role" \
-    --assignee $userObjectId \
-    --scope $aksClusterId \
-    --only-show-errors 1>/dev/null
-
-  if [[ $? == 0 ]]; then
-    echo "[$userPrincipalName] user successfully assigned to the [$role] role on the [$aksName] AKS cluster"
-  else
-    echo "Failed to assign the [$userPrincipalName] user to the [$role] role on the [$aksName] AKS cluster"
-    exit
-  fi
-fi
-
-# Assign Azure Kubernetes Service Cluster Admin Role role to the current user
-role="Azure Kubernetes Service Cluster Admin Role"
-echo "Checking if [$userPrincipalName] user has been assigned to [$role] role on the [$aksName] AKS cluster..."
-current=$(az role assignment list \
-  --assignee $userObjectId \
-  --scope $aksClusterId \
-  --query "[?roleDefinitionName=='$role'].roleDefinitionName" \
-  --output tsv 2>/dev/null)
-
-if [[ $current == "Owner" ]] || [[ $current == "Contributor" ]] || [[ $current == "$role" ]]; then
-  echo "[$userPrincipalName] user is already assigned to the [$current] role on the [$aksName] AKS cluster"
-else
-  echo "[$userPrincipalName] user is not assigned to the [$role] role on the [$aksName] AKS cluster"
-  echo "Assigning the [$userPrincipalName] user to the [$role] role on the [$aksName] AKS cluster..."
-
-  az role assignment create \
-    --role "$role" \
-    --assignee $userObjectId \
-    --scope $aksClusterId \
-    --only-show-errors 1>/dev/null
-
-  if [[ $? == 0 ]]; then
-    echo "[$userPrincipalName] user successfully assigned to the [$role] role on the [$aksName] AKS cluster"
-  else
-    echo "Failed to assign the [$userPrincipalName] user to the [$role] role on the [$aksName] AKS cluster"
-    exit
-  fi
-fi
+// Outputs
+output id string = applicationGateway.id
+output name string = applicationGateway.name
+output privateLinkFrontendIPConfigurationName string = privateLinkEnabled ? frontendIPConfigurationName : ''
 ```
+
 
 ## Deployment Script
 
@@ -925,97 +861,31 @@ echo '{}' |
   jq --arg x 'ingress-basic' '.nginxIngressController=$x' >$AZ_SCRIPTS_OUTPUT_PATH
 ```
 
-As you can note, when deploying the [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview) via Helm, the [service.beta.kubernetes.io/azure-load-balancer-internal](https://learn.microsoft.com/en-us/azure/aks/internal-lb#create-an-internal-load-balancer) to create the `kubernetes-internal` internal load balancer in the node resource group of the AKS cluster and expose the ingress controller service via a private IP address.
+The [httpbin](https://httpbin.org/) web application is deployed via YAML templates. In particular, an [ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) object is used to expose the application using the [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview) via the HTTP protocol. The default ingress hostname is `httpbin.contoso.internal`, but you can control the hostname using the following parameters in the `main.bicep` module:
 
-In this sample, the [httpbin](https://httpbin.org/) web application via YAML templates. In particular, an [ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) is used to expose the application via the [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview) via the HTTP protocol and using the `httpbin.local` hostname. The ingress object can be easily modified to expose the server via HTTPS and provide a certificate for TLS termination. You can use the [cert-manager](https://cert-manager.io/docs/) to issue a [Let's Encrypt](https://letsencrypt.org/) certificate. For more information, see [Securing NGINX-ingress](https://cert-manager.io/docs/tutorials/acme/nginx-ingress/#issuers). In particular, [cert-manager](https://cert-manager.io/docs/) can create and then delete DNS-01 records in [Azure DNS](https://learn.microsoft.com/en-us/azure/dns/dns-overview) but it needs to authenticate to Azure first. The suggested authentication method is [Managed Identity Using AAD Workload Identity](https://cert-manager.io/docs/configuration/acme/dns01/azuredns/#managed-identity-using-aad-pod-identity).
+```bicep
+@description('Specifies the subdomain of the Kubernetes ingress object.')
+param subdomain string = 'httpbin'
 
-## Alternative Solution
+@description('Specifies the domain of the Kubernetes ingress object.')
+param domain string = 'contoso.internal'
+```
 
-[Azure Private Link Service (PLS)](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview) is an infrastructure component that allows users to privately connect via an [Azure Private Endpoint (PE)](https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview) in a virtual network in Azure and a Frontend IP Configuration associated with an internal or public [Azure Load Balancer (ALB)](https://learn.microsoft.com/en-us/azure/load-balancer/load-balancer-overview). With Private Link, users as service providers can securely provide their services to consumers who can connect from within Azure or on-premises without data exfiltration risks.
-
-Before Private Link Service integration, users who wanted private connectivity from on-premises or other virtual networks to their services in an [Azure Kubernetes Service(AKS)](https://docs.microsoft.com/en-us/azure/aks/intro-kubernetes) cluster were required to create a Private Link Service (PLS) to reference the cluster Azure Load Balancer, like in this sample. The user would then create an [Azure Private Endpoint (PE)](https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview) to connect to the PLS to enable private connectivity. With the [Azure Private Link Service Integration](https://cloud-provider-azure.sigs.k8s.io/topics/pls-integration/) feature, a managed [Azure Private Link Service (PLS)](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview) to the AKS cluster load balancer can be created automatically, and the user would only be required to create Private Endpoint connections to it for private connectivity. You can expose a Kubernetes service via a Private Link Service using annotations. For more information, see [Azure Private Link Service Integration](https://cloud-provider-azure.sigs.k8s.io/topics/pls-integration/).
-
-## CI/CD and GitOps Considerations
-
-[Azure Private Link Service Integration](https://cloud-provider-azure.sigs.k8s.io/topics/pls-integration/) simplifies the creation of a [Azure Private Link Service (PLS)](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview) when deploying Kubernetes services or ingress controllers via a classic CI/CD pipeline using [Azure DevOps](https://learn.microsoft.com/en-us/azure/aks/devops-pipeline?pivots=pipelines-yaml), [GitHub Actions](https://azure.github.io/kube-labs/1-github-actions.html), [Jenkins](https://learn.microsoft.com/en-us/azure/architecture/solution-ideas/articles/container-cicd-using-jenkins-and-kubernetes-on-azure-container-service), or [GitLab](https://docs.gitlab.com/charts/installation/cloud/aks.html), but even when using a GitOps approach with [Argo CD](https://techcommunity.microsoft.com/t5/apps-on-azure-blog/getting-started-with-gitops-argo-and-azure-kubernetes-service/ba-p/3288595) or [Flux v2](https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/tutorial-use-gitops-flux2?tabs=azure-cli).
-
-For every workload that you expose via [Azure Private Link Service (PLS)](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview) and [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview), you need to create - [Microsoft.Cdn/profiles/originGroups](https://learn.microsoft.com/en-us/azure/templates/microsoft.cdn/profiles/origingroups?pivots=deployment-language-bicep): an [Origin Group](https://learn.microsoft.com/en-us/azure/frontdoor/origin?pivots=front-door-standard-premium#origin-group), an [Origin](https://learn.microsoft.com/en-us/azure/frontdoor/origin?pivots=front-door-standard-premium#origin), endpoint, a route, and a security policy if you want to protect the workload with a WAF policy. You can accomplish this task using [az network front-door]([az network front-door](https://learn.microsoft.com/en-us/cli/azure/network/front-door?view=azure-cli-latest)) Azure CLI commands in the CD pipeline used to deploy your service.
+The ingress object can be easily modified to expose the server via HTTPS and provide a certificate for TLS termination. You can use the [cert-manager](https://cert-manager.io/docs/) installed by the script to issue a [Let's Encrypt](https://letsencrypt.org/) certificate. For more information, see [Use certificates with LetsEncrypt.org on Application Gateway for AKS clusters](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-letsencrypt-certificate-application-gateway). In particular, [cert-manager](https://cert-manager.io/docs/) can create and then delete DNS-01 records in [Azure DNS](https://learn.microsoft.com/en-us/azure/dns/dns-overview) but it needs to authenticate to Azure first. The suggested authentication method is [Managed Identity Using AAD Workload Identity](https://cert-manager.io/docs/configuration/acme/dns01/azuredns/#managed-identity-using-aad-pod-identity).
 
 ## Test the application
 
-If the deployment succeeds, and the private endpoint connection from the [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) instance to the [Azure Private Link Service (PLS)](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview) is approved, you should be able to access the AKS-hosted [httpbin](https://httpbin.org/) web application as follows:
+If the deployment succeeds, you should be able to access the AKS-hosted [httpbin](https://httpbin.org/) web application from the client virtual machine as follows:
 
-- Navigate to the overview page of your Front Door Premium in the Azure Portal and copy the URL from the Endpoint hostname, as shown in the following picture
+- Navigate to Azure Portal and connect to the client virtual machine via Azure Bastion.
+- Run the the `nslookup httpbin.contoso.internal` command. If you customized the subdomain and domain used by the ingress object and Private DNS Zone, make sure to replace `httpbin.contoso.internal` with `subdomain`.`domain`. The command should return the private IP address of the `ApplicationGatewayPrivateEndpoint` used by the client virtual machine to invoke the [httpbin](https://httpbin.org/) web application as shown by the following figure.
 
-![Azure Front Door Premium in the Azure Portal](images/azure-portal.png)
+![nslookup](images/nslookup.png)
 
-- Paste and open the URL in your favorite internet browser. You should see the user interface of the [httpbin](https://httpbin.org/) application:
+- Call any of the REST API methods exposed by [httpbin](https://httpbin.org/) web application, for example `/headers`. If the call succeeds, you should see a result like the one shown in the following figure.
 
-![HTTPBIN application](images/httpbin.png)
+![nslookup](images/headers.png)
 
-You can use the `bicep/calls.sh` Bash script to simulate a few attacks and see the managed rule set and custom rule of the [Azure Web Application Firewall](https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/afds-overview) in action.
-
-```bash
-#!/bin/bash
-
-# Variables
-url="<Front Door Endpoint Hostname URL>"
-
-# Call REST API
-echo "Calling REST API..."
-curl -I -s "$url"
-
-# Simulate SQL injection
-echo "Simulating SQL injection..."
-curl -I -s "${url}?users=ExampleSQLInjection%27%20--"
-
-# Simulate XSS
-echo "Simulating XSS..."
-curl -I -s "${url}?users=ExampleXSS%3Cscript%3Ealert%28%27XSS%27%29%3C%2Fscript%3E"
-
-# A custom rule blocks any request with the word blockme in the querystring.
-echo "Simulating query string manipulation with the 'attack' word in the query string..."
-curl -I -s "${url}?task=blockme"
-```
-
-The Bash script should produce the following output, where the first call succeeds, while the remaining one are blocked by the WAF Policy configured in prevention mode.
-
-```Bash
-Calling REST API...
-HTTP/2 200
-content-length: 9593
-content-type: text/html; charset=utf-8
-accept-ranges: bytes
-vary: Accept-Encoding
-access-control-allow-origin: *
-access-control-allow-credentials: true
-x-azure-ref: 05mwQZAAAAADma91JbmU0TJqRqS2lyFurTUlMMzBFREdFMDYwOQA3YTk2NzZiMS0xZmRjLTQ0OWYtYmI1My1hNDUxMDVjNGZmYmM=
-x-cache: CONFIG_NOCACHE
-date: Tue, 14 Mar 2023 12:47:33 GMT
-
-Simulating SQL injection...
-HTTP/2 403
-x-azure-ref: 05mwQZAAAAABaQCSGQToQT4tifYGpmsTmTUlMMzBFREdFMDYxNQA3YTk2NzZiMS0xZmRjLTQ0OWYtYmI1My1hNDUxMDVjNGZmYmM=
-date: Tue, 14 Mar 2023 12:47:34 GMT
-
-Simulating XSS...
-HTTP/2 403
-x-azure-ref: 05mwQZAAAAAAJZzCrTmN4TLY+bZOxskzOTUlMMzBFREdFMDYxMwA3YTk2NzZiMS0xZmRjLTQ0OWYtYmI1My1hNDUxMDVjNGZmYmM=
-date: Tue, 14 Mar 2023 12:47:33 GMT
-
-Simulating query string manipulation with the 'attack' word in the query string...
-HTTP/2 403
-x-azure-ref: 05mwQZAAAAADAle0hOg4FTYH6Q1LHIP50TUlMMzBFREdFMDYyMAA3YTk2NzZiMS0xZmRjLTQ0OWYtYmI1My1hNDUxMDVjNGZmYmM=
-date: Tue, 14 Mar 2023 12:47:33 GMT
-```
-
-[Front Door WAF Policies](https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/afds-overview) and [Application Gateway WAF policies](https://learn.microsoft.com/en-us/azure/web-application-firewall/ag/ag-overview) can be configured to run in the following two modes:
-
-- `Detection mode`: When run in detection mode, WAF doesn't take any other actions other than monitors and logs the request and its matched WAF rule to WAF logs. You can turn on logging diagnostics for Front Door. When you use the portal, go to the Diagnostics section.
-
-- `Prevention mode`: In prevention mode, WAF takes the specified action if a request matches a rule. If a match is found, no further rules with lower priority are evaluated. Any matched requests are also logged in the WAF logs.
-
-For more information, see [Azure Web Application Firewall on Azure Front Door](https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/afds-overview).
 
 ## Review deployed resources
 
@@ -1052,4 +922,4 @@ Remove-AzResourceGroup -Name <resource-group-name>
 
 ## Next Steps
 
-You could [add a custom domain to your Front Door](https://learn.microsoft.com/en-us/azure/frontdoor/front-door-custom-domain). If you use [Azure DNS](https://learn.microsoft.com/en-us/azure/dns/dns-overview) to manage your domain, you could extend the Bicep modules to automatically create a custom domain for your Front Door and create a CNAME DNS record in your public DNS zone.
+You could change the default hostname used by the ingress object and expose the backend service via HTTPS using a TLS/SSL certificate for your domain. For more information, see [Use certificates with LetsEncrypt.org on Application Gateway for AKS clusters](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-letsencrypt-certificate-application-gateway). If you use [Azure DNS](https://learn.microsoft.com/en-us/azure/dns/dns-overview) to manage your domain, you could extend the Bicep modules to automatically create a custom domain for your Front Door and create a CNAME DNS record in your public DNS zone.
