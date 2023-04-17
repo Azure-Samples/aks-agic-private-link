@@ -37,16 +37,6 @@ Private Link for Application Gateway allows you to connect workloads over a priv
 
 This article shows how to use [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview), [Azure Web Application Firewall](https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/afds-overview), and [Azure Private Link Service (PLS)](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview) to securely expose and protect a workload running in [Azure Kubernetes Service(AKS)](https://docs.microsoft.com/en-us/azure/aks/intro-kubernetes) via the [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview).
 
-In addition, this sample shows how to deploy an [Azure Kubernetes Service](https://docs.microsoft.com/en-us/azure/aks/intro-kubernetes) cluster with the following features:
-
-- [API Server VNET Integration](https://learn.microsoft.com/en-us/azure/aks/api-server-vnet-integration) allows you to enable network communication between the API server and the cluster nodes without requiring a private link or tunnel. AKS clusters with API Server VNET integration provide a series of advantages, for example, they can have public network access or private cluster mode enabled or disabled without redeploying the cluster. For more information, see [Create an Azure Kubernetes Service cluster with API Server VNet Integration](https://learn.microsoft.com/en-us/azure/aks/api-server-vnet-integration).
-- [Azure NAT Gateway](https://learn.microsoft.com/en-us/azure/virtual-network/nat-gateway/nat-overview) to manage outbound connections initiated by AKS-hosted workloads.
-- [Event-driven Autoscaling (KEDA) add-on](https://learn.microsoft.com/en-us/azure/aks/keda-about) is a single-purpose and lightweight component that strives to make application autoscaling simple and is a CNCF Incubation project.
-- [Dapr extension for Azure Kubernetes Service (AKS)](https://learn.microsoft.com/en-us/azure/aks/dapr) allows you to install [Dapr](https://dapr.io/), a portable, event-driven runtime that simplifies building resilient, stateless, and stateful applications that run on the cloud and edge and embrace the diversity of languages and developer frameworks. With its sidecar architecture, Dapr helps you tackle the challenges that come with building microservices and keeps your code platform agnostic.
-- [Flux V2 extension](https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/tutorial-use-gitops-flux2?tabs=azure-cli) allows to deploy workloads to an Azure Kubernetes Service (AKS) cluster via [GitOps](https://www.weave.works/technologies/gitops/). For more information, see [GitOps Flux v2 configurations with AKS and Azure Arc-enabled Kubernetes](https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/conceptual-gitops-flux2)
-- [Vertical Pod Autoscaling](https://learn.microsoft.com/en-us/azure/aks/vertical-pod-autoscaler) allows you to automatically sets resource requests and limits on containers per workload based on past usage. VPA makes certain pods are scheduled onto nodes that have the required CPU and memory resources. For more information, see [Kubernetes Vertical Pod Autoscaling](https://itnext.io/k8s-vertical-pod-autoscaling-fd9e602cbf81).
-- [Azure Key Vault Provider for Secrets Store CSI Driver](https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-identity-access) provides a variety of methods of identity-based access to your [Azure Key Vault](https://learn.microsoft.com/en-us/azure/key-vault/general/overview).
-
 ## Prerequisites
 
 - An active [Azure subscription](https://docs.microsoft.com/en-us/azure/guides/developer/azure-developer-guide#understanding-accounts-subscriptions-and-billing). If you don't have one, create a [free Azure account](https://azure.microsoft.com/free/) before you begin.
@@ -54,13 +44,16 @@ In addition, this sample shows how to deploy an [Azure Kubernetes Service](https
 
 ## Architecture
 
-This sample provides a set of Bicep modules to deploy and configure an [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) with an [WAF Policy](https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/afds-overview) as regional layer 7 load balancer in front of a public or a private AKS cluster with [API Server VNET Integration](https://learn.microsoft.com/en-us/azure/aks/api-server-vnet-integration), [Azure CNI](https://learn.microsoft.com/en-us/azure/aks/configure-azure-cni) as a network plugin and [Dynamic IP Allocation](https://learn.microsoft.com/en-us/azure/aks/configure-azure-cni#dynamic-allocation-of-ips-and-enhanced-subnet-support). The following diagram shows the architecture and network topology deployed by the sample:
+This sample provides a set of Bicep modules to deploy and configure an [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) with an [WAF Policy](https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/afds-overview) as regional layer 7 load balancer in front of a public or a private AKS cluster with [API Server VNET Integration](https://learn.microsoft.com/en-us/azure/aks/api-server-vnet-integration), [Azure CNI](https://learn.microsoft.com/en-us/azure/aks/configure-azure-cni) as a network plugin and [Dynamic IP Allocation](https://learn.microsoft.com/en-us/azure/aks/configure-azure-cni#dynamic-allocation-of-ips-and-enhanced-subnet-support). The sample implements a scenario where a client application consumes a service exposed by a SaaS provider. The server application workload runs on an [Azure Kubernetes Service(AKS)](https://docs.microsoft.com/en-us/azure/aks/intro-kubernetes) cluster and is exposed via the [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview). The frontend IP configuration of the [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) is configured to be exposed via [Private Link](https://learn.microsoft.com/en-us/azure/application-gateway/private-link). A frontend IP address is the IP address associated with an application gateway. You can configure an application gateway to have a public IP address, a private IP address, or both. An application gateway supports one public or one private IP address. Your virtual network and public IP address must be in the same location as your application gateway.
+
+> **NOTE**  
+> At the time of this writing, [Application Gateway Private Link](https://learn.microsoft.com/en-us/azure/application-gateway/private-link) configuration support for tunneling traffic through an Azure private endpoint to a private IP only Application Gateway is unsupported.
+
+The following diagram shows the architecture and network topology deployed by the sample:
 
 ![AKS Architecture](images/architecture.png)
 
-A [Deployment Script](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-script-bicep) is used to create the [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview), configured to use a private IP address as frontend IP configuration of the `kubernetes-internal` internal load balancer, via Helm and a sample [httpbin](https://httpbin.org/) web application via YAML manifests. The [Origin](https://learn.microsoft.com/en-us/azure/frontdoor/origin?pivots=front-door-standard-premium) child resource of the [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) regional layer 7 load balancer is configured to call the sample application via [Azure Private Link Service](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview), the AKS the `kubernetes-internal` internal load balancer, and the [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview), as shown in the following figure:  
-
-![Message Flow](images/flow.png)
+A [Deployment Script](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-script-bicep) is used to create a sample [httpbin](https://httpbin.org/) web application via YAML manifests. An [ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) is created to expose the Kubernetes service via the [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) via the [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview).
 
 Bicep modules are parametric, so you can choose any network plugin:
 
@@ -72,42 +65,43 @@ Bicep modules are parametric, so you can choose any network plugin:
 - [Kubenet](https://learn.microsoft.com/en-us/azure/aks/configure-kubenet)
 
 > **NOTE**  
-> The sample was tested only with [Azure CNI](https://learn.microsoft.com/en-us/azure/aks/configure-azure-cni) and [Azure CNI Overlay](https://learn.microsoft.com/en-us/azure/aks/azure-cni-overlay)
+> The sample was tested only with [Azure CNI with dynamic IP allocation](https://learn.microsoft.com/en-us/azure/aks/configure-azure-cni). [Azure CNI Overlay](https://learn.microsoft.com/en-us/azure/aks/azure-cni-overlay) does not currently support the [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview). For more information, see [Limitations with Azure CNI Overlay](https://learn.microsoft.com/en-us/azure/aks/azure-cni-overlay#limitations-with-azure-cni-overlay).
 
 The Bicep modules also allow installing the following extensions and add-ons for [Azure Kubernetes Service(AKS)](https://docs.microsoft.com/en-us/azure/aks/intro-kubernetes):
 
-- [Dapr extension](https://learn.microsoft.com/en-us/azure/aks/dapr)
-- [Flux v2 extension](https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/tutorial-use-gitops-flux2?tabs=azure-cli)
-- [Kubernetes Event-driven Autoscaling (KEDA) add-on](https://learn.microsoft.com/en-us/azure/aks/keda-deploy-add-on-cli)
-- [Open Service Mesh add-on](https://learn.microsoft.com/en-us/azure/aks/open-service-mesh-about)
+In addition, this sample shows how to deploy an [Azure Kubernetes Service](https://docs.microsoft.com/en-us/azure/aks/intro-kubernetes) cluster with the following features:
+
+- [API Server VNET Integration](https://learn.microsoft.com/en-us/azure/aks/api-server-vnet-integration) allows you to enable network communication between the API server and the cluster nodes without requiring a private link or tunnel. AKS clusters with API Server VNET integration provide a series of advantages, for example, they can have public network access or private cluster mode enabled or disabled without redeploying the cluster. For more information, see [Create an Azure Kubernetes Service cluster with API Server VNet Integration](https://learn.microsoft.com/en-us/azure/aks/api-server-vnet-integration).
+- [Azure NAT Gateway](https://learn.microsoft.com/en-us/azure/virtual-network/nat-gateway/nat-overview) to manage outbound connections initiated by AKS-hosted workloads.
+- [Event-driven Autoscaling (KEDA) add-on](https://learn.microsoft.com/en-us/azure/aks/keda-about) is a single-purpose and lightweight component that strives to make application autoscaling simple and is a CNCF Incubation project.
+- [Dapr extension for Azure Kubernetes Service (AKS)](https://learn.microsoft.com/en-us/azure/aks/dapr) allows you to install [Dapr](https://dapr.io/), a portable, event-driven runtime that simplifies building resilient, stateless, and stateful applications that run on the cloud and edge and embrace the diversity of languages and developer frameworks. With its sidecar architecture, Dapr helps you tackle the challenges that come with building microservices and keeps your code platform agnostic.
+- [Flux V2 extension](https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/tutorial-use-gitops-flux2?tabs=azure-cli) allows to deploy workloads to an Azure Kubernetes Service (AKS) cluster via [GitOps](https://www.weave.works/technologies/gitops/). For more information, see [GitOps Flux v2 configurations with AKS and Azure Arc-enabled Kubernetes](https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/conceptual-gitops-flux2)
+- [Vertical Pod Autoscaling](https://learn.microsoft.com/en-us/azure/aks/vertical-pod-autoscaler) allows you to automatically sets resource requests and limits on containers per workload based on past usage. VPA makes certain pods are scheduled onto nodes that have the required CPU and memory resources. For more information, see [Kubernetes Vertical Pod Autoscaling](https://itnext.io/k8s-vertical-pod-autoscaling-fd9e602cbf81).
+- [Azure Key Vault Provider for Secrets Store CSI Driver](https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-identity-access) provides a variety of methods of identity-based access to your [Azure Key Vault](https://learn.microsoft.com/en-us/azure/key-vault/general/overview).
+- [Open Service Mesh add-on](https://learn.microsoft.com/en-us/azure/aks/open-service-mesh-about) is a lightweight, extensible, cloud native service mesh that allows you to uniformly manage, secure, and get out-of-the-box observability features for highly dynamic microservice environments.
 
 In a production environment, we strongly recommend deploying a [private AKS cluster](https://docs.microsoft.com/en-us/azure/aks/private-clusters) with [Uptime SLA](https://docs.microsoft.com/en-us/azure/aks/uptime-sla). For more information, see [private AKS cluster with a Public DNS address](https://docs.microsoft.com/en-us/azure/aks/private-clusters#create-a-private-aks-cluster-with-a-public-dns-address). Alternatively, you can deploy a public AKS cluster and secure access to the API server using [authorized IP address ranges](https://learn.microsoft.com/en-us/azure/aks/api-server-authorized-ip-ranges).
 
-The Bicep modules deploy the following Azure resources:
+The Bicep modules deploy the following Azure resources for the service provider:
 
-- [Microsoft.Cdn/profiles](https://learn.microsoft.com/en-us/azure/templates/microsoft.cdn/profiles?pivots=deployment-language-bicep): an [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) resource used to expose the AKS-hosted sample application via [Azure Private Link Service](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview) and [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview). The Bicep module creates the following child resources to expose the workload:
-  - [Microsoft.Cdn/profiles/originGroups](https://learn.microsoft.com/en-us/azure/templates/microsoft.cdn/profiles/origingroups?pivots=deployment-language-bicep): an [Origin Group](https://learn.microsoft.com/en-us/azure/frontdoor/origin?pivots=front-door-standard-premium#origin-group) in [Azure Front Door](https://learn.microsoft.com/en-us/azure/frontdoor/front-door-overview) refers to a set of [Origins](https://learn.microsoft.com/en-us/azure/frontdoor/origin?pivots=front-door-standard-premium#origin) that receives similar traffic for their application. You can define the Origin Group as a logical grouping of your application instances across the world that receives the same traffic and responds with an expected behavior. These Origins can be deployed across different regions or within the same region. All origins can be deployed in an Active/Active or Active/Passive configuration.
-  - [Microsoft.Cdn/profiles/originGroups/origins](https://learn.microsoft.com/en-us/azure/templates/microsoft.cdn/profiles/origingroups/origins?pivots=deployment-language-bicep): an [Origin](https://learn.microsoft.com/en-us/azure/frontdoor/origin?pivots=front-door-standard-premium#origin) refers to the application deployment exposed via [Azure Front Door](https://learn.microsoft.com/en-us/azure/frontdoor/front-door-overview). An Origin defines properties of the underlying backend application like its type, weight, priority, host header, and more. In this sample, the [Origin](https://learn.microsoft.com/en-us/azure/frontdoor/origin?pivots=front-door-standard-premium#origin) is configured to call the [httpbin](https://httpbin.org/) web application via an [Azure Private Link Service](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview).
-  - [Microsoft.Cdn/profiles/afdEndpoints](https://learn.microsoft.com/en-us/azure/templates/microsoft.cdn/profiles/afdendpoints?pivots=deployment-language-bicep): in [Azure Front Door Standard/Premium](https://learn.microsoft.com/en-us/azure/frontdoor/front-door-overview), an endpoint is a logical grouping of one or more routes that are associated with domain names. Each endpoint is assigned a domain name by Front Door, and you can associate your own custom domains by using routes.
-  - [Microsoft.Cdn/profiles/securityPolicies](https://learn.microsoft.com/en-us/azure/templates/microsoft.cdn/profiles/securitypolicies?pivots=deployment-language-bicep): a security policy associates a WAF policy to a list of domains and paths. For more information, see [Security and Azure Front Door](https://learn.microsoft.com/en-us/azure/architecture/framework/services/networking/azure-front-door/security).
-  - [Microsoft.Network/FrontDoorWebApplicationFirewallPolicies](https://learn.microsoft.com/en-us/azure/templates/microsoft.network/2019-03-01/frontdoorwebapplicationfirewallpolicies?pivots=deployment-language-bicep): [Azure Web Application Firewall (WAF)](https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/afds-overview) on [Azure Front Door](https://learn.microsoft.com/en-us/azure/frontdoor/front-door-overview) provides centralized protection for your web applications. WAF defends your web services against common exploits and vulnerabilities. It keeps your service highly available for your users and helps you meet compliance requirements. You can configure a WAF policy and associate that policy to one or more Front Door front-ends for protection. The WAF policy deployed by this sample consists of three types of security rules:
-    - [Custom rules](https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/afds-overview#custom-authored-rules) are used to block incoming requests based on the content of the payload, querystring, HTTP request method, IP address of the caller, and more. This sample add a couple of customer rules to block calls coming from a given IP range or calls that contain the word `blockme` in the querystring.
-    - [OWASP](https://owasp.org/) [Azure-managed rule sets](https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/afds-overview#azure-managed-rule-sets) provide an easy way to deploy protection against a common set of security threats like SQL injection or cross-site scripting.
-    - [Bot protection rule set](https://learn.microsoft.com/en-us/azure/web-application-firewall/afds/afds-overview#bot-protection-rule-set) can be used to take custom actions on requests from known bot categories.
-- [Microsoft.Network/privateLinkServices](https://learn.microsoft.com/en-us/azure/templates/microsoft.network/privatelinkservices?pivots=deployment-language-bicep): an [Azure Private Link Service](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview) is configured to reference the `kubernetes-internal` internal load balancer of the AKS cluster.
-  - [Microsoft.Cdn/profiles/afdEndpoints/routes](https://learn.microsoft.com/en-us/azure/templates/microsoft.cdn/profiles/afdendpoints/routes?pivots=deployment-language-bicep): a route defines properties such as custom domains, http redirect, supported protocols, and origin path that specify how to invoke the backend application. For more information, see [Routing architecture overview](https://learn.microsoft.com/en-us/azure/frontdoor/front-door-routing-architecture?pivots=front-door-standard-premium).
+- [Microsoft.Network/applicationGateways](https://learn.microsoft.com/en-us/azure/templates/microsoft.network/applicationgateways?pivots=deployment-language-bicep): an [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) resource used to expose the AKS-hosted sample application via [Azure Private Link Service](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview) and [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview).
+- [Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies](https://learn.microsoft.com/en-us/azure/templates/microsoft.network/applicationgatewaywebapplicationfirewallpolicies?pivots=deployment-language-bicep): [Azure Web Application Firewall (WAF)](https://learn.microsoft.com/en-us/azure/web-application-firewall/ag/ag-overview) on [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) provides centralized protection for your web applications. WAF defends your web services against common exploits and vulnerabilities. It keeps your service highly available for your users and helps you meet compliance requirements. You can configure a WAF policy and associate that policy to one or more Front Door front-ends for protection. The WAF policy deployed by this sample consists of three types of security rules:
+  - [Custom rules](https://learn.microsoft.com/en-us/azure/web-application-firewall/ag/ag-overview#custom-rules) are used to block incoming requests based on the content of the payload, querystring, HTTP request method, IP address of the caller, and more. This sample add a couple of customer rules to block calls coming from a given IP range or calls that contain the word `blockme` in the querystring.
+  - [OWASP](https://owasp.org/) [Core rule sets](https://learn.microsoft.com/en-us/azure/web-application-firewall/ag/ag-overview#core-rule-sets) provide an easy way to deploy protection against a common set of security threats like SQL injection or cross-site scripting.
+  - [Bot protection rule set](https://learn.microsoft.com/en-us/azure/web-application-firewall/ag/ag-overview#bot-protection-rule-set) can be used to take custom actions on requests from known bot categories.
 - [Microsoft.ContainerService/managedClusters](https://learn.microsoft.com/en-us/azure/templates/microsoft.containerservice/managedclusters?pivots=deployment-language-bicep): A public or private AKS cluster composed of a:
   - `system` node pool in a dedicated subnet. The default node pool hosts only critical system pods and services. The worker nodes have node taint which prevents application pods from beings scheduled on this node pool.
   - `user` node pool hosting user workloads and artifacts in a dedicated subnet.
-- [Microsoft.Network/virtualNetworks](https://docs.microsoft.com/en-us/azure/templates/microsoft.network/virtualnetworks): a new virtual network with six subnets:
-  - `SystemSubnet`: this subnet is used for the agent nodes of the `system` node pool.
-  - `UserSubnet`: this subnet is used for the agent nodes of the `user` node pool.
-  - `PodSubnet`: this subnet is used to allocate private IP addresses to pods dynamically.
+- [Microsoft.Network/virtualNetworks](https://docs.microsoft.com/en-us/azure/templates/microsoft.network/virtualnetworks): a new virtual network with seven subnets:
+  - `SystemSubnet`: a subnet used for the agent nodes of the `system` node pool.
+  - `UserSubnet`: a subnet used for the agent nodes of the `user` node pool.
+  - `PodSubnet`: a subnet used to allocate private IP addresses to pods dynamically.
   - `ApiServerSubnet`: API Server VNET Integration projects the API server endpoint directly into this delegated subnet in the virtual network where the AKS cluster is deployed.
   - `AzureBastionSubnet`: a subnet for the Azure Bastion Host.
   - `VmSubnet`: a subnet for a jump-box virtual machine used to connect to the (private) AKS cluster and for the private endpoints.
+  - `AppGatewaySubnet`: a subnet hosting the Application Gateway.
 - [Microsoft.ManagedIdentity/userAssignedIdentities](https://learn.microsoft.com/en-us/azure/templates/microsoft.managedidentity/2018-11-30/userassignedidentities?pivots=deployment-language-bicep): a user-defined managed identity used by the AKS cluster to create additional resources like load balancers and managed disks in Azure.
-- [Microsoft.Compute/virtualMachines](https://docs.microsoft.com/en-us/azure/templates/microsoft.compute/virtualmachines): Bicep modules create a jump-box virtual machine to manage the private AKS cluster.
+- [Microsoft.Compute/virtualMachines](https://docs.microsoft.com/en-us/azure/templates/microsoft.compute/virtualmachines): Bicep modules can optionally create a jump-box virtual machine to manage the private AKS cluster.
 - [Microsoft.Network/bastionHosts](https://docs.microsoft.com/en-us/azure/templates/microsoft.network/bastionhosts): a separate Azure Bastion is deployed in the AKS cluster virtual network to provide SSH connectivity to both agent nodes and virtual machines.
 - [Microsoft.Network/natGateways](https://learn.microsoft.com/en-us/azure/templates/microsoft.network/natgateways?pivots=deployment-language-bicep): a bring-your-own (BYO) [Azure NAT Gateway](https://learn.microsoft.com/en-us/azure/virtual-network/nat-gateway/nat-overview) to manage outbound connections initiated by AKS-hosted workloads. The NAT Gateway is associated to the `SystemSubnet`, `UserSubnet`, and `PodSubnet` subnets. The [outboundType](https://learn.microsoft.com/en-us/azure/aks/egress-outboundtype#outbound-type-of-managednatgateway-or-userassignednatgateway) property of the cluster is set to `userAssignedNatGateway` to specify that a BYO NAT Gateway is used for outbound connections. NOTE: you can update the `outboundType` after cluster creation and this will deploy or remove resources as required to put the cluster into the new egress configuration. For more information, see [Updating outboundType after cluster creation](https://learn.microsoft.com/en-us/azure/aks/egress-outboundtype#updating-outboundtype-after-cluster-creation-preview).
 - [Microsoft.Storage/storageAccounts](https://docs.microsoft.com/en-us/azure/templates/microsoft.storage/storageaccounts): this storage account is used to store the boot diagnostics logs of both the service provider and service consumer virtual machines. Boot Diagnostics is a debugging feature that allows you to view console output and screenshots to diagnose virtual machine status.
@@ -130,10 +124,20 @@ The Bicep modules deploy the following Azure resources:
   - Azure Network Security Group
   - Azure Container Registry
   - Azure Storage Account
+  - Azure jump-box virtual machine
 - [Microsoft.Resources/deploymentScripts](https://learn.microsoft.com/en-us/azure/templates/microsoft.resources/deploymentscripts?pivots=deployment-language-bicep): a deployment script is used to run the `install-helm-charts-and-app.sh` Bash script which installs the [httpbin](https://httpbin.org/) web application via YAML templates and the following packages to the AKS cluster via [Helm](https://helm.sh/). For more information on deployment scripts, see [Use deployment scripts in Bicep](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-script-bicep)
   - [NGINX Ingress Controller](https://docs.nginx.com/nginx-ingress-controller/)
   - [Cert-Manager](https://cert-manager.io/docs/)
   - [Prometheus](https://prometheus.io/)
+
+The Bicep modules deploy the following Azure resources for the service consumer:
+
+- [Microsoft.Network/virtualNetworks](https://docs.microsoft.com/en-us/azure/templates/microsoft.network/virtualnetworks): a new virtual network with two subnets:
+  - `AzureBastionSubnet`: a subnet for the Azure Bastion Host.
+  - `VmSubnet`: a subnet for the client virtual machine and Private Endpoints.
+- [Microsoft.Compute/virtualMachines](https://docs.microsoft.com/en-us/azure/templates/microsoft.compute/virtualmachines): this client virtual machine can be used to call the sample application the AKS-hosted server application via and [Azure Private Endpoint](https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview) that refers the [Application Gateway Private Link](https://learn.microsoft.com/en-us/azure/application-gateway/private-link), [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview), and [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview).
+- [Microsoft.Network/bastionHosts](https://docs.microsoft.com/en-us/azure/templates/microsoft.network/bastionhosts): this Azure Bastion host can be used to connect to the client virtual machine via SSH.
+- [Microsoft.OperationalInsights/workspaces](https://docs.microsoft.com/en-us/azure/templates/microsoft.operationalinsights/workspaces): a centralized [Azure Log Analytics](https://docs.microsoft.com/en-us/azure/azure-monitor/logs/log-analytics-workspace-overview) workspace is used to collect the diagnostics logs and metrics from the client virtual machine
 
 > **NOTE**  
 > You can find the `architecture.vsdx` file used for the diagram under the `visio` folder.
@@ -164,17 +168,31 @@ template="main.bicep"
 parameters="main.parameters.json"
 
 # AKS cluster name
-prefix="<Azure-Resource-Name-Prefix>"
+prefix="Yellow"
 aksName="${prefix}Aks"
 validateTemplate=1
-useWhatIf=0
+useWhatIf=1
 update=1
 installExtensions=0
 
 # Name and location of the resource group for the Azure Kubernetes Service (AKS) cluster
-resourceGroupName="${prefix}RG"
-location="westeurope"
-deploymentName="main"
+aksResourceGroupName="${prefix}RG"
+location="northeurope"
+
+# Name and resource group name of the Azure Container Registry used by the AKS cluster.
+# The name of the cluster is also used to create or select an existing admin group in the Azure AD tenant.
+acrName="${prefix}Acr"
+acrResourceGroupName="$aksResourceGroupName"
+acrSku="Premium"
+
+# Name of Key Vault
+keyVaultName="${prefix}KeyVault"
+
+# Name of the Log Analytics
+logAnalyticsWorkspaceName="${prefix}LogAnalytics"
+
+# Name of the virtual machine
+vmName="${prefix}Vm"
 
 # Subscription id, subscription name, and tenant id of the current subscription
 subscriptionId=$(az account show --query id --output tsv)
@@ -206,23 +224,14 @@ if [[ $installExtensions == 1 ]]; then
     fi
   fi
 
-  # Registering AKS feature extensions
+  # Registering AKS features
   aksExtensions=(
-    "PodSecurityPolicyPreview"
-    "KubeletDisk"
     "AKS-KedaPreview"
     "RunCommandPreview"
-    "EnablePodIdentityPreview "
-    "UserAssignedIdentityPreview"
-    "EnablePrivateClusterPublicFQDN"
-    "PodSubnetPreview"
     "EnableOIDCIssuerPreview"
     "EnableWorkloadIdentityPreview"
     "EnableImageCleanerPreview"
-    "AKS-VPAPreview"
-    "AzureOverlayPreview"
-    "KubeProxyConfigurationPreview"
-  )
+    "AKS-VPAPreview")
   ok=0
   registeringExtensions=()
   for aksExtension in ${aksExtensions[@]}; do
@@ -259,6 +268,45 @@ if [[ $installExtensions == 1 ]]; then
     az provider register --namespace Microsoft.ContainerService
     echo "Microsoft.ContainerService resource provider registration successfully refreshed"
   fi
+
+  # Registering Network features
+  networkExtensions=("EnableApplicationGatewayNetworkIsolation")
+  ok=0
+  registeringExtensions=()
+  for networkExtension in ${networkExtensions[@]}; do
+    echo "Checking if [$networkExtension] extension is already registered..."
+    extension=$(az feature list -o table --query "[?contains(name, 'Microsoft.Network/$networkExtension') && @.properties.state == 'Registered'].{Name:name}" --output tsv)
+    if [[ -z $extension ]]; then
+      echo "[$networkExtension] extension is not registered."
+      echo "Registering [$networkExtension] extension..."
+      az feature register --name $networkExtension --namespace Microsoft.ContainerService
+      registeringExtensions+=("$networkExtension")
+      ok=1
+    else
+      echo "[$networkExtension] extension is already registered."
+    fi
+  done
+  echo $registeringExtensions
+  delay=1
+  for networkExtension in ${registeringExtensions[@]}; do
+    echo -n "Checking if [$networkExtension] extension is already registered..."
+    while true; do
+      extension=$(az feature list -o table --query "[?contains(name, 'Microsoft.Network/$networkExtension') && @.properties.state == 'Registered'].{Name:name}" --output tsv)
+      if [[ -z $extension ]]; then
+        echo -n "."
+        sleep $delay
+      else
+        echo "."
+        break
+      fi
+    done
+  done
+
+  if [[ $ok == 1 ]]; then
+    echo "Refreshing the registration of the Microsoft.ContainerService resource provider..."
+    az provider register --namespace Microsoft.Network
+    echo "Microsoft.ContainerService resource provider registration successfully refreshed"
+  fi
 fi
 
 # Get the last Kubernetes version available in the region
@@ -272,85 +320,85 @@ else
 fi
 
 # Check if the resource group already exists
-echo "Checking if [$resourceGroupName] resource group actually exists in the [$subscriptionName] subscription..."
+echo "Checking if [$aksResourceGroupName] resource group actually exists in the [$subscriptionName] subscription..."
 
-az group show --name $resourceGroupName &>/dev/null
+az group show --name $aksResourceGroupName &>/dev/null
 
 if [[ $? != 0 ]]; then
-  echo "No [$resourceGroupName] resource group actually exists in the [$subscriptionName] subscription"
-  echo "Creating [$resourceGroupName] resource group in the [$subscriptionName] subscription..."
+  echo "No [$aksResourceGroupName] resource group actually exists in the [$subscriptionName] subscription"
+  echo "Creating [$aksResourceGroupName] resource group in the [$subscriptionName] subscription..."
 
   # Create the resource group
-  az group create --name $resourceGroupName --location $location 1>/dev/null
+  az group create --name $aksResourceGroupName --location $location 1>/dev/null
 
   if [[ $? == 0 ]]; then
-    echo "[$resourceGroupName] resource group successfully created in the [$subscriptionName] subscription"
+    echo "[$aksResourceGroupName] resource group successfully created in the [$subscriptionName] subscription"
   else
-    echo "Failed to create [$resourceGroupName] resource group in the [$subscriptionName] subscription"
+    echo "Failed to create [$aksResourceGroupName] resource group in the [$subscriptionName] subscription"
     exit
   fi
 else
-  echo "[$resourceGroupName] resource group already exists in the [$subscriptionName] subscription"
+  echo "[$aksResourceGroupName] resource group already exists in the [$subscriptionName] subscription"
 fi
 
 # Create AKS cluster if does not exist
-echo "Checking if [$aksName] aks cluster actually exists in the [$resourceGroupName] resource group..."
+echo "Checking if [$aksName] aks cluster actually exists in the [$aksResourceGroupName] resource group..."
 
-az aks show --name $aksName --resource-group $resourceGroupName &>/dev/null
+az aks show --name $aksName --resource-group $aksResourceGroupName &>/dev/null
 notExists=$?
 
 if [[ $notExists != 0 || $update == 1 ]]; then
 
   if [[ $notExists != 0 ]]; then
-    echo "No [$aksName] aks cluster actually exists in the [$resourceGroupName] resource group"
+    echo "No [$aksName] aks cluster actually exists in the [$aksResourceGroupName] resource group"
   else
-    echo "[$aksName] aks cluster already exists in the [$resourceGroupName] resource group. Updating the cluster..."
+    echo "[$aksName] aks cluster already exists in the [$aksResourceGroupName] resource group. Updating the cluster..."
   fi
 
   # Delete any existing role assignments for the user-defined managed identity of the AKS cluster
   # in case you are re-deploying the solution in an existing resource group
-  echo "Retrieving the list of role assignments on [$resourceGroupName] resource group..."
+  echo "Retrieving the list of role assignments on [$aksResourceGroupName] resource group..."
   assignmentIds=$(az role assignment list \
-    --scope "/subscriptions/${subscriptionId}/resourceGroups/${resourceGroupName}" \
+    --scope "/subscriptions/${subscriptionId}/resourceGroups/${aksResourceGroupName}" \
     --query [].id \
     --output tsv \
     --only-show-errors)
 
   if [[ -n $assignmentIds ]]; then
-    echo "[${#assignmentIds[@]}] role assignments have been found on [$resourceGroupName] resource group"
+    echo "[${#assignmentIds[@]}] role assignments have been found on [$aksResourceGroupName] resource group"
     for assignmentId in ${assignmentIds[@]}; do
       if [[ -n $assignmentId ]]; then
         az role assignment delete --ids $assignmentId
 
         if [[ $? == 0 ]]; then
           assignmentName=$(echo $assignmentId | awk -F '/' '{print $NF}')
-          echo "[$assignmentName] role assignment on [$resourceGroupName] resource group successfully deleted"
+          echo "[$assignmentName] role assignment on [$aksResourceGroupName] resource group successfully deleted"
         fi
       fi
     done
   else
-    echo "No role assignment actually exists on [$resourceGroupName] resource group"
+    echo "No role assignment actually exists on [$aksResourceGroupName] resource group"
   fi
 
   # Get the kubelet managed identity used by the AKS cluster
   echo "Retrieving the kubelet identity from the [$aksName] AKS cluster..."
   clientId=$(az aks show \
     --name $aksName \
-    --resource-group $resourceGroupName \
+    --resource-group $aksResourceGroupName \
     --query identityProfile.kubeletidentity.clientId \
     --output tsv 2>/dev/null)
 
   if [[ -n $clientId ]]; then
     # Delete any role assignment to kubelet managed identity on any ACR in the resource group
     echo "kubelet identity of the [$aksName] AKS cluster successfully retrieved"
-    echo "Retrieving the list of ACR resources in the [$resourceGroupName] resource group..."
+    echo "Retrieving the list of ACR resources in the [$aksResourceGroupName] resource group..."
     acrIds=$(az acr list \
-      --resource-group $resourceGroupName \
+      --resource-group $aksResourceGroupName \
       --query [].id \
       --output tsv)
 
     if [[ -n $acrIds ]]; then
-      echo "[${#acrIds[@]}] ACR resources have been found in [$resourceGroupName] resource group"
+      echo "[${#acrIds[@]}] ACR resources have been found in [$aksResourceGroupName] resource group"
       for acrId in ${acrIds[@]}; do
         if [[ -n $acrId ]]; then
           acrName=$(echo $acrId | awk -F '/' '{print $NF}')
@@ -379,7 +427,7 @@ if [[ $notExists != 0 || $update == 1 ]]; then
         fi
       done
     else
-      echo "No ACR actually exists in [$resourceGroupName] resource group"
+      echo "No ACR actually exists in [$aksResourceGroupName] resource group"
     fi
   else
     echo "No kubelet identity exists for the [$aksName] AKS cluster"
@@ -391,12 +439,17 @@ if [[ $notExists != 0 || $update == 1 ]]; then
       # Execute a deployment What-If operation at resource group scope.
       echo "Previewing changes deployed by [$template] Bicep template..."
       az deployment group what-if \
-        --resource-group $resourceGroupName \
+        --resource-group $aksResourceGroupName \
         --template-file $template \
         --parameters $parameters \
-        --parameters prefix=$prefix \
-        location=$location \
-        aksClusterKubernetesVersion=$kubernetesVersion
+        --parameters \
+        prefix=$prefix \
+        aksClusterName=$aksName \
+        aksClusterKubernetesVersion=$kubernetesVersion \
+        acrName=$acrName \
+        keyVaultName=$keyVaultName \
+        logAnalyticsWorkspaceName=$logAnalyticsWorkspaceName \
+        vmName=$vmName
 
       if [[ $? == 0 ]]; then
         echo "[$template] Bicep template validation succeeded"
@@ -408,12 +461,17 @@ if [[ $notExists != 0 || $update == 1 ]]; then
       # Validate the Bicep template
       echo "Validating [$template] Bicep template..."
       output=$(az deployment group validate \
-        --resource-group $resourceGroupName \
+        --resource-group $aksResourceGroupName \
         --template-file $template \
         --parameters $parameters \
-        --parameters prefix=$prefix \
-        location=$location \
-        aksClusterKubernetesVersion=$kubernetesVersion)
+        --parameters \
+        prefix=$prefix \
+        aksClusterName=$aksName \
+        aksClusterKubernetesVersion=$kubernetesVersion \
+        acrName=$acrName \
+        keyVaultName=$keyVaultName \
+        logAnalyticsWorkspaceName=$logAnalyticsWorkspaceName \
+        vmName=$vmName)
 
       if [[ $? == 0 ]]; then
         echo "[$template] Bicep template validation succeeded"
@@ -428,14 +486,18 @@ if [[ $notExists != 0 || $update == 1 ]]; then
   # Deploy the Bicep template
   echo "Deploying [$template] Bicep template..."
   az deployment group create \
-    --name $deploymentName \
-    --resource-group $resourceGroupName \
+    --resource-group $aksResourceGroupName \
     --only-show-errors \
     --template-file $template \
     --parameters $parameters \
-    --parameters prefix=$prefix \
-    location=$location \
-    aksClusterKubernetesVersion=$kubernetesVersion 1>/dev/null
+    --parameters \
+    prefix=$prefix \
+    aksClusterName=$aksName \
+    aksClusterKubernetesVersion=$kubernetesVersion \
+    acrName=$acrName \
+    keyVaultName=$keyVaultName \
+    logAnalyticsWorkspaceName=$logAnalyticsWorkspaceName \
+    vmName=$vmName 1>/dev/null
 
   if [[ $? == 0 ]]; then
     echo "[$template] Bicep template successfully provisioned"
@@ -444,16 +506,16 @@ if [[ $notExists != 0 || $update == 1 ]]; then
     exit
   fi
 else
-  echo "[$aksName] aks cluster already exists in the [$resourceGroupName] resource group"
+  echo "[$aksName] aks cluster already exists in the [$aksResourceGroupName] resource group"
 fi
 
 # Create AKS cluster if does not exist
-echo "Checking if [$aksName] aks cluster actually exists in the [$resourceGroupName] resource group..."
+echo "Checking if [$aksName] aks cluster actually exists in the [$aksResourceGroupName] resource group..."
 
-az aks show --name $aksName --resource-group $resourceGroupName &>/dev/null
+az aks show --name $aksName --resource-group $aksResourceGroupName &>/dev/null
 
 if [[ $? != 0 ]]; then
-  echo "No [$aksName] aks cluster actually exists in the [$resourceGroupName] resource group"
+  echo "No [$aksName] aks cluster actually exists in the [$aksResourceGroupName] resource group"
   exit
 fi
 
@@ -482,7 +544,7 @@ fi
 echo "Retrieving the resource id of the [$aksName] AKS cluster..."
 aksClusterId=$(az aks show \
   --name "$aksName" \
-  --resource-group "$resourceGroupName" \
+  --resource-group "$aksResourceGroupName" \
   --query id \
   --output tsv 2>/dev/null)
 
@@ -550,79 +612,11 @@ else
     exit
   fi
 fi
-
-# Get the FQDN of the Azure Front Door endpoint
-azureFrontDoorEndpointFqdn=$(az deployment group show \
- --name $deploymentName \
- --resource-group $resourceGroupName \
- --query properties.outputs.frontDoorEndpointFqdn.value \
- --output tsv)
-
-if [[ -n $azureFrontDoorEndpointFqdn ]]; then
- echo "FQDN of the Azure Front Door endpoint: $azureFrontDoorEndpointFqdn"
-else
- echo "Failed to get the FQDN of the Azure Front Door endpoint"
- exit -1
-fi
-
-# Get the private link service name
-privateLinkServiceName=$(az deployment group show \
- --name $deploymentName \
- --resource-group $resourceGroupName \
- --query properties.outputs.privateLinkServiceName.value \
- --output tsv)
-
-if [[ -z $privateLinkServiceName ]]; then
- echo "Failed to get the private link service name"
- exit -1
-fi
-
-# Get the resource id of the Private Endpoint Connection
-privateEndpointConnectionId=$(az network private-endpoint-connection list \
- --name $privateLinkServiceName \
- --resource-group $resourceGroupName \
- --type Microsoft.Network/privateLinkServices \
- --query [0].id \
- --output tsv)
-
-if [[ -n $privateEndpointConnectionId ]]; then
- echo "Resource id of the Private Endpoint Connection: $privateEndpointConnectionId"
-else
- echo "Failed to get the resource id of the Private Endpoint Connection"
- exit -1
-fi
-
-# Approve the private endpoint connection
-echo "Approving [$privateEndpointConnectionId] private endpoint connection ID..."
-az network private-endpoint-connection approve \
- --name $privateLinkServiceName \
- --resource-group $resourceGroupName \
- --id $privateEndpointConnectionId \
- --description "Approved" 1>/dev/null
-
-if [[ $? == 0 ]]; then
- echo "[$privateEndpointConnectionId] private endpoint connection ID successfully approved"
-else
- echo "Failed to approve [$privateEndpointConnectionId] private endpoint connection ID"
- exit -1
-fi
 ```
-
-The last steps of the Bash script perform the following actions: 
-
-- [az deployment group show](https://learn.microsoft.com/en-us/cli/azure/deployment/group?view=azure-cli-latest#az-deployment-group-show) command: retrieves the name of the [Azure Private Link Service](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview) from the outputs of the deployment.
-- [az network private-endpoint-connection list](https://learn.microsoft.com/en-us/cli/azure/network/private-endpoint-connection?view=azure-cli-latest#az-network-private-endpoint-connection-list) command: gets the resource id of the [Azure Private Link Service](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview).
-- [az network private-endpoint-connection approve](https://learn.microsoft.com/en-us/cli/azure/network/private-endpoint-connection?view=azure-cli-latest#az-network-private-endpoint-connection-approve) approves the private endpoint connection from the [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) resource.
-
-If you miss running these steps, Azure Front Door cannot invoke the [httpbin](https://httpbin.org/) web application via the [Azure Private Link Service](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview), and the `kubernetes-internal` internal load balancer of the AKS cluster.
 
 ## Deployment Script
 
-The sample makes use of a [Deployment Script](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-script-bicep) to run the `install-helm-charts-and-app.sh` Bash script which installs the [httpbin](https://httpbin.org/) web application via YAML templates and the following packages to the AKS cluster via [Helm](https://helm.sh/). For more information on deployment scripts, see [Use deployment scripts in Bicep](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-script-bicep)
-
-- [NGINX Ingress Controller](https://docs.nginx.com/nginx-ingress-controller/)
-- [Cert-Manager](https://cert-manager.io/docs/)
-- [Prometheus](https://prometheus.io/)
+The sample makes use of a [Deployment Script](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-script-bicep) to run the `install-helm-charts-and-agic-sample.sh` Bash script which installs the [httpbin](https://httpbin.org/) web application via YAML templates and the following packages to the AKS cluster via [Helm](https://helm.sh/). For more information on deployment scripts, see [Use deployment scripts in Bicep](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-script-bicep). The script also installs the [cert-Manager](https://cert-manager.io/docs/) via Helm and a [cluster issues](https://cert-manager.io/docs/configuration/) for the [Application Gateway Ingress Controller](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-overview).
 
 ```bash
 # Install kubectl
@@ -649,8 +643,6 @@ chmod 700 get_helm.sh
 ./get_helm.sh &>/dev/null
 
 # Add Helm repos
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo add jetstack https://charts.jetstack.io
 
 # Update Helm repos
@@ -659,46 +651,6 @@ helm repo update
 if [[ $private == 'true' ]]; then
   # Log whether the cluster is public or private
   echo "$clusterName AKS cluster is public"
-
-  # Install Prometheus
-  command="helm install prometheus prometheus-community/kube-prometheus-stack \
-  --create-namespace \
-  --namespace prometheus \
-  --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
-  --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false"
-
-  az aks command invoke \
-    --name $clusterName \
-    --resource-group $resourceGroupName \
-    --subscription $subscriptionId \
-    --command "$command"
-
-  # Install NGINX ingress controller using the internal load balancer
-  command="helm install nginx-ingress ingress-nginx/ingress-nginx \
-    --create-namespace \
-    --namespace ingress-basic \
-    --set controller.config.enable-modsecurity=true \
-    --set controller.config.enable-owasp-modsecurity-crs=true \
-    --set controller.config.modsecurity-snippet=\
-'SecRuleEngine On
-SecRequestBodyAccess On
-SecAuditLog /dev/stdout
-SecAuditLogFormat JSON
-SecAuditEngine RelevantOnly' \
-    --set controller.replicaCount=3 \
-    --set controller.nodeSelector.\"kubernetes\.io/os\"=linux \
-    --set defaultBackend.nodeSelector.\"kubernetes\.io/os\"=linux \
-    --set controller.metrics.enabled=true \
-    --set controller.metrics.serviceMonitor.enabled=true \
-    --set controller.metrics.serviceMonitor.additionalLabels.release=\"prometheus\" \
-    --set controller.service.annotations.\"service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path\"=/healthz \
-    --set controller.service.annotations.\"service\.beta\.kubernetes\.io/azure-load-balancer-internal\"=true"
-
-  az aks command invoke \
-    --name $clusterName \
-    --resource-group $resourceGroupName \
-    --subscription $subscriptionId \
-    --command "$command"
 
   # Install certificate manager
   command="helm install cert-manager jetstack/cert-manager \
@@ -712,13 +664,13 @@ SecAuditEngine RelevantOnly' \
     --resource-group $resourceGroupName \
     --subscription $subscriptionId \
     --command "$command"
-
-  # Create cluster issuer
+  
+    # Create cluster issuer for the Application Gateway Ingress Controller (AGIC)
   command="cat <<EOF | kubectl apply -f -
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
-  name: letsencrypt-nginx
+  name: letsencrypt-application-gateway
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
@@ -728,7 +680,7 @@ spec:
     solvers:
     - http01:
         ingress:
-          class: nginx
+          class: azure/application-gateway
           podTemplate:
             spec:
               nodeSelector:
@@ -825,7 +777,7 @@ kind: Ingress
 metadata:
   name: httpbin
 spec:
-  ingressClassName: nginx
+  ingressClassName: azure/application-gateway
   rules:
   - host: $hostName
     http:
@@ -847,38 +799,7 @@ EOF"
 
 else
   # Log whether the cluster is public or private
-  echo "$clusterName AKS cluster is private"
-
-  # Install Prometheus
-  helm install prometheus prometheus-community/kube-prometheus-stack \
-    --create-namespace \
-    --namespace prometheus \
-    --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
-    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
-
-  # Install NGINX ingress controller using the internal load balancer
-  helm install nginx-ingress ingress-nginx/ingress-nginx \
-    --create-namespace \
-    --namespace ingress-basic \
-    --set controller.config.enable-modsecurity=true \
-    --set controller.config.enable-owasp-modsecurity-crs=true \
-    --set controller.config.modsecurity-snippet='SecRuleEngine On
-SecRequestBodyAccess On
-SecAuditLog /dev/stdout
-SecAuditLogFormat JSON
-SecAuditEngine RelevantOnly' \
-    --set controller.replicaCount=3 \
-    --set controller.nodeSelector."kubernetes\.io/os"=linux \
-    --set defaultBackend.nodeSelector."kubernetes\.io/os"=linux \
-    --set controller.metrics.enabled=true \
-    --set controller.metrics.serviceMonitor.enabled=true \
-    --set controller.metrics.serviceMonitor.additionalLabels.release="prometheus" \
-    --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"=/healthz \
-    --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-internal"=true
-
-  helm install $nginxReleaseName $nginxRepoName/$nginxChartName \
-    --create-namespace \
-    --namespace $nginxNamespace
+  echo "$clusterName AKS cluster is public"
 
   # Install certificate manager
   helm install cert-manager jetstack/cert-manager \
@@ -887,12 +808,12 @@ SecAuditEngine RelevantOnly' \
     --set installCRDs=true \
     --set nodeSelector."kubernetes\.io/os"=linux
 
-  # Create cluster issuer
+  # Create cluster issuer for the Application Gateway Ingress Controller (AGIC)
   cat <<EOF | kubectl apply -f -
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
-  name: letsencrypt-nginx
+  name: letsencrypt-application-gateway
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
@@ -902,7 +823,7 @@ spec:
     solvers:
     - http01:
         ingress:
-          class: nginx
+          class: azure/application-gateway
           podTemplate:
             spec:
               nodeSelector:
@@ -981,7 +902,7 @@ kind: Ingress
 metadata:
   name: httpbin
 spec:
-  ingressClassName: nginx
+  ingressClassName: azure-application-gateway
   rules:
   - host: $hostName
     http:
