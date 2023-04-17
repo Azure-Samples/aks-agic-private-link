@@ -23,13 +23,13 @@ products:
 - azure-monitor
 - azure-log-analytics
 - azure-virtual-machines
-name:  How to call a workload in AKS via Private Link, Application Gateway, and AGIC
+name:  How to call a workload in AKS via Private Link, Application Gateway, and Application Gateway Ingress Controller
 description: This sample shows how to communicate with an AKS-hosted workload via Private Link, Application Gateway, and Application Gateway Ingress Controller.
 urlFragment: aks-agic-private-link
 azureDeploy: "https://raw.githubusercontent.com/Azure-Samples/aks-agic-private-link/main/bicep/main.json"
 ---
 
-# How to expose NGINX Ingress Controller via Azure Front Door and Azure Private Link Service
+# How to call a workload in AKS via Private Link, Application Gateway, and Application Gateway Ingress Controller
 
 [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) can connect to a backend application via [Azure Private Link Service (PLS)](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview). For more information, see [Application Gateway Private Link](https://learn.microsoft.com/en-us/azure/application-gateway/private-link).
 
