@@ -29,7 +29,7 @@ urlFragment: aks-agic-private-link
 azureDeploy: "https://raw.githubusercontent.com/Azure-Samples/aks-agic-private-link/main/bicep/main.json"
 ---
 
-# How to call a workload in AKS via Private Link, Application Gateway, and Application Gateway Ingress Controller
+# How to call an AKS-hosted workload via Application Gateway Private Link and Application Gateway Ingress Controller
 
 [Azure Application Gateway](https://learn.microsoft.com/en-us/azure/application-gateway/overview) can connect to a backend application via [Azure Private Link Service (PLS)](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview). For more information, see [Application Gateway Private Link](https://learn.microsoft.com/en-us/azure/application-gateway/private-link).
 
@@ -878,11 +878,11 @@ The ingress object can be easily modified to expose the server via HTTPS and pro
 If the deployment succeeds, you should be able to access the AKS-hosted [httpbin](https://httpbin.org/) web application from the client virtual machine as follows:
 
 - Navigate to Azure Portal and connect to the client virtual machine via Azure Bastion.
-- Run the the `nslookup httpbin.contoso.internal` command. If you customized the subdomain and domain used by the ingress object and Private DNS Zone, make sure to replace `httpbin.contoso.internal` with `subdomain`.`domain`. The command should return the private IP address of the `ApplicationGatewayPrivateEndpoint` used by the client virtual machine to invoke the [httpbin](https://httpbin.org/) web application as shown by the following figure.
+- Run the the `nslookup httpbin.contoso.internal` command. If you customized the subdomain and domain used by the ingress object and Private DNS Zone, make sure to replace `httpbin.contoso.internal` with `subdomain`.`domain`. The command should return the private IP address of the `ApplicationGatewayPrivateEndpoint` used by the client virtual machine to invoke the [httpbin](https://httpbin.org/) web application as shown in the following figure.
 
 ![nslookup](images/nslookup.png)
 
-- Call any of the REST API methods exposed by [httpbin](https://httpbin.org/) web application, for example `/headers`. If the call succeeds, you should see a result like the one shown in the following figure.
+- Call any of the REST API methods exposed by [httpbin](https://httpbin.org/) web application, for example `/headers`. If the call succeeds, you should see a result like the one in the following figure.
 
 ![nslookup](images/headers.png)
 
