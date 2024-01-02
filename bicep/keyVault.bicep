@@ -9,7 +9,7 @@ param name string
 ])
 param skuName string = 'standard'
 
-@description('Specifies the Azure Active Directory tenant ID that should be used for authenticating requests to the key vault.')
+@description('Specifies the Microsoft Entra ID tenant ID that should be used for authenticating requests to the key vault.')
 param tenantId string = subscription().tenantId
 
 @description('The default action of allow or deny when no other rules match. Allowed values: Allow or Deny')
