@@ -154,7 +154,7 @@ You can deploy the Bicep modules in the `bicep` folder using the `deploy.sh` Bas
 - `vmAdminUsername`: specifies the name of the administrator account of the virtual machine.
 - `vmAdminPasswordOrKey`: specifies the SSH Key or password for the virtual machine.
 - `aksClusterSshPublicKey`:  specifies the SSH Key or password for AKS cluster agent nodes.
-- `aadProfileAdminGroupObjectIDs`: when deploying an AKS cluster with Azure AD and Azure RBAC integration, this array parameter contains the list of Azure AD group object IDs that will have the admin role of the cluster.
+- `aadProfileAdminGroupObjectIDs`: when deploying an AKS cluster with Microsoft Entra ID and Azure RBAC integration, this array parameter contains the list of Microsoft Entra ID group object IDs that will have the admin role of the cluster.
 - `keyVaultObjectIds`: Specifies the object ID of the service principals to configure in Key Vault access policies.
 
 We suggest reading sensitive configuration data such as passwords or SSH keys from a pre-existing Azure Key Vault resource. For more information, see [Use Azure Key Vault to pass secure parameter value during Bicep deployment](https://docs.microsoft.com/en-us/azure/azure-resource-manager/bicep/key-vault-parameter?tabs=azure-cli).

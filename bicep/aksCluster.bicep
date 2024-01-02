@@ -92,7 +92,7 @@ param adminUsername string = 'azureuser'
 @description('Specifies the SSH RSA public key string for the Linux nodes.')
 param sshPublicKey string
 
-@description('Specifies the tenant id of the Azure Active Directory used by the AKS cluster for authentication.')
+@description('Specifies the tenant id of the Microsoft Entra ID used by the AKS cluster for authentication.')
 param aadProfileTenantId string = subscription().tenantId
 
 @description('Specifies the AAD group object IDs that will have admin role of the cluster.')

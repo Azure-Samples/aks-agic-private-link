@@ -89,7 +89,7 @@ param aksClusterAdminUsername string = 'azureuser'
 @description('Specifies the SSH RSA public key string for the Linux nodes.')
 param aksClusterSshPublicKey string
 
-@description('Specifies the tenant id of the Azure Active Directory used by the AKS cluster for authentication.')
+@description('Specifies the tenant id of the Microsoft Entra ID used by the AKS cluster for authentication.')
 param aadProfileTenantId string = subscription().tenantId
 
 @description('Specifies the AAD group object IDs that will have admin role of the cluster.')
@@ -447,10 +447,10 @@ param vmSize string = 'Standard_DS3_v2'
 param imagePublisher string = 'Canonical'
 
 @description('Specifies the offer of the platform image or marketplace image used to create the virtual machine.')
-param imageOffer string = 'UbuntuServer'
+param imageOffer string = '0001-com-ubuntu-server-jammy'
 
 @description('Specifies the Ubuntu version for the VM. This will pick a fully patched image of this given Ubuntu version.')
-param imageSku string = '18.04-LTS'
+param imageSku string = '22_04-lts-gen2'
 
 @description('Specifies the type of authentication when accessing the Virtual Machine. SSH key is recommended.')
 @allowed([
